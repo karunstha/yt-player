@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yt-player"
+version = "0.1.0"
+description = "MCP server and media playback service that lets AI assistants play music on a real speaker."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Karun Shrestha" }]
+requires-python = ">=3.10"
+keywords = ["mcp", "model-context-protocol", "youtube", "music", "media-player", "yt-dlp"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Multimedia :: Sound/Audio :: Players",
+]
+# The base install is only the MCP server, which talks to the playback
+# service over HTTP. The playback service itself needs the `server` extra.
+dependencies = [
+    "mcp>=2.1.1,<3",
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.128",
+    "uvicorn>=0.40",
+    "pydantic>=2.12",
+    "python-dotenv>=1.2",
+    # [default] bundles yt-dlp-ejs, the YouTube challenge solver, so it is
+    # not downloaded from GitHub at playback time.
+    "yt-dlp[default]>=2025.12.8",
+    "ytmusicapi>=1.11",
+]
+dev = [
+    "yt-player[server]",
+    "pytest>=9",
+]
+
+[project.scripts]
+yt-player = "yt_player.cli:main"
+yt-player-mcp = "yt_player.cli:mcp_main"
+
+[project.urls]
+Homepage = "https://github.com/karunstha/yt-player"
+Issues = "https://github.com/karunstha/yt-player/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["yt_player"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["cookie.txt", "data/", ".env"]

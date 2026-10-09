@@ -1,0 +1,63 @@
+# Host-specific values come from a .env file next to this one.
+# See .env.example for the available settings.
+#
+# Audio plays through the host's PulseAudio (or PipeWire's pipewire-pulse)
+# socket by default. For plain ALSA, set AUDIO_DRIVER=alsa in .env.
+services:
+  yt-player:
+    build: .
+    image: yt-player
+    container_name: yt-player
+
+    network_mode: host
+    privileged: true
+
+    volumes:
+      # PulseAudio socket
+      - ${PULSE_RUNTIME_DIR:-/run/user/1000/pulse}:/run/pulse
+
+      # Bluetooth control channel
+      - /run/dbus:/run/dbus
+      - /var/lib/bluetooth:/var/lib/bluetooth
+
+      # Persistent service data (database, optional cookies.txt)
+      - ${DATA_PATH:-./data}:/data
+
+    devices:
+      - /dev/snd:/dev/snd
+
+    environment:
+      - PULSE_SERVER=unix:/run/pulse/native
+      - DATA_DIR=/data
+      - SERVICE_HOST=${SERVICE_HOST:-0.0.0.0}
+      - SERVICE_PORT=${SERVICE_PORT:-5454}
+      - AUDIO_DRIVER=${AUDIO_DRIVER:-pulseaudio}
+      - AUDIO_DEVICE=${AUDIO_DEVICE:-}
+      - DEFAULT_BLUETOOTH_DEVICE_ID=${DEFAULT_BLUETOOTH_DEVICE_ID:-}
+      - DEFAULT_VOLUME=${DEFAULT_VOLUME:-0.8}
+      - DEFAULT_SEARCH_TYPE=${DEFAULT_SEARCH_TYPE:-songs}
+
+    restart: unless-stopped
+
+  yt-player-mcp:
+    build: .
+    image: yt-player
+    container_name: yt-player-mcp
+    profiles:
+      - mcp
+
+    network_mode: host
+
+    command: ["yt-player", "mcp"]
+
+    environment:
+      - MEDIA_SERVICE_URL=http://127.0.0.1:${SERVICE_PORT:-5454}
+      - MCP_TRANSPORT=streamable-http
+      - MCP_HOST=${MCP_HOST:-127.0.0.1}
+      - MCP_PORT=${MCP_PORT:-5455}
+      - MCP_STREAMABLE_HTTP_PATH=/mcp
+
+    depends_on:
+      - yt-player
+
+    restart: unless-stopped

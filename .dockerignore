@@ -1,0 +1,13 @@
+# Keep secrets and local state out of the Docker build context.
+.git
+.env
+.venv
+venv
+data
+cookie.txt
+cookies.txt
+**/__pycache__
+*.pyc
+.pytest_cache
+dist
+build
