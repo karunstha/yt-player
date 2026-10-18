@@ -56,4 +56,7 @@ def test_yt_dlp_runs_with_current_interpreter_and_ffplay_path(monkeypatch):
 
     ytdlp_command, ffplay_command = launched
     assert ytdlp_command[:3] == [sys.executable, "-m", "yt_dlp"]
+    assert "--http-chunk-size" in ytdlp_command
+    assert ytdlp_command[ytdlp_command.index("--http-chunk-size") + 1] == "10M"
+    assert "--downloader" not in ytdlp_command
     assert ffplay_command[0] == "/opt/ffmpeg/bin/ffplay"

@@ -115,14 +115,11 @@ class FfplayBackend:
             "bestaudio",
             "--no-part",
             "--no-mtime",
-            "--downloader",
-            "ffmpeg",
-            "--downloader-args",
-            (
-                "ffmpeg_i:-reconnect 1 -reconnect_streamed 1 "
-                "-reconnect_on_network_error 1 -reconnect_delay_max 5 "
-                "-reconnect_delay_total_max 30 -rw_timeout 15000000"
-            ),
+            # Google throttles a long sequential HTTP transfer from this host.
+            # Native yt-dlp chunk requests use byte ranges and keep the audio
+            # stream ahead of real time instead of starving ffplay.
+            "--http-chunk-size",
+            "10M",
             "--socket-timeout",
             "15",
             "--retries",
