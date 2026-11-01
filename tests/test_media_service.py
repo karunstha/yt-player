@@ -712,3 +712,37 @@ def test_position_follows_the_audio_clock_not_launch_time():
         assert (await service.snapshot()).position_seconds == 12.5
 
     asyncio.run(scenario())
+
+
+def test_state_reads_loading_until_audio_is_heard():
+    async def scenario():
+        backend = FakeBackend()
+        backend.clock = None
+        backend.audio_clock = lambda: backend.clock
+        service = PlaybackService(backend)
+        await service.play(make_track("alpha", duration_seconds=240))
+
+        assert (await service.snapshot()).state == "loading"
+        assert await service.status_name() == "playing"  # internal state is unchanged
+
+        backend.clock = (0.1, 0.0)
+        assert (await service.snapshot()).state == "playing"
+
+        # A seek restarts the stream: buffering again, held at the target.
+        backend.clock = None
+        state = await service.seek(90)
+        assert (state.state, state.position_seconds) == ("loading", 90)
+
+    asyncio.run(scenario())
+
+
+def test_play_history_starts_while_still_buffering(tmp_path):
+    async def scenario():
+        backend = FakeBackend()
+        backend.audio_clock = lambda: None
+        controller, repository = make_controller(tmp_path, backend)
+        state = await controller.play(PlayRequest(query="alpha", queue_more=False))
+        assert state.state == "loading"
+        assert controller._active_history_id is not None
+
+    asyncio.run(scenario())

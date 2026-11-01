@@ -33,6 +33,10 @@ from yt_player.sources.api import register_search_routes
 from yt_player.sources.youtube import YouTubeService
 
 
+SYNC_TICK_SECONDS = 0.5
+SYNC_INTERVAL_SECONDS = 3.0
+
+
 def create_app(
     *,
     repository: PlaylistRepository | None = None,
@@ -65,11 +69,20 @@ def create_app(
     sync_task: asyncio.Task | None = None
 
     async def sync_loop() -> None:
+        # Ticks often so a change nobody requested (audio finally starting
+        # after buffering, a track ending) reaches clients within half a
+        # second; the periodic position sync stays every few seconds.
+        last_state: str | None = None
+        since_sync = 0.0
         while True:
-            await asyncio.sleep(3)
+            await asyncio.sleep(SYNC_TICK_SECONDS)
+            since_sync += SYNC_TICK_SECONDS
             await controller.reconcile_playback()
             state = await controller.get_state()
-            if state.state == "playing":
+            changed = last_state is not None and state.state != last_state
+            last_state = state.state
+            if changed or (state.state == "playing" and since_sync >= SYNC_INTERVAL_SECONDS):
+                since_sync = 0.0
                 await event_service.broadcast("playback.sync", state.model_dump(mode="json"))
 
     @asynccontextmanager

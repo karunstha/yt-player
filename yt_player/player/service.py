@@ -291,7 +291,7 @@ class PlaybackService:
         self, *, queue_index: int | None = None, queue_length: int = 0
     ) -> PlaybackState:
         return PlaybackState(
-            state=self._status,
+            state=self._reported_status_unlocked(),
             track=self._track,
             position_seconds=self._position_unlocked(),
             duration_seconds=self._track.duration_seconds if self._track else None,
@@ -304,6 +304,19 @@ class PlaybackService:
             updated_at=self._updated_at,
             error=self._error,
         )
+
+    def _audio_started_unlocked(self) -> bool:
+        audio_clock = getattr(self.backend, "audio_clock", None)
+        # Backends without a clock (tests, other players) count as started.
+        return audio_clock is None or audio_clock() is not None
+
+    def _reported_status_unlocked(self) -> str:
+        # After a play, seek, or restart the stream is still downloading;
+        # report "loading" until audio is heard so clients do not advance
+        # their own clocks (lyrics, progress) through the silence.
+        if self._status == "playing" and not self._audio_started_unlocked():
+            return "loading"
+        return self._status
 
     def _position_unlocked(self) -> float:
         if self._status != "playing" or self._started_at is None:

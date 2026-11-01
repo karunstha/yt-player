@@ -485,7 +485,8 @@ class PlaybackController:
         return await self.queue.extend(unique)
 
     def _start_history(self, track: Track, state: PlaybackState) -> None:
-        if state.state != "playing":
+        # "loading" here means started but still buffering, which still counts.
+        if state.state not in ("playing", "loading"):
             return
         self._active_history_id = self.playlists.start_play_history(
             track,
