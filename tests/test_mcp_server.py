@@ -24,6 +24,7 @@ def test_mcp_server_registers_core_tools():
     assert "list_playlists" in tool_names
     assert "add_current_track_to_playlist" in tool_names
     assert "play_playlist" in tool_names
+    assert "get_lyrics" in tool_names
 
 
 def test_mcp_run_uses_stdio_by_default(monkeypatch):

@@ -691,3 +691,24 @@ def test_playlist_description_can_be_kept_changed_and_cleared(tmp_path):
 
         blank = client.post("/playlists", json={"name": "Blank", "description": "   "}).json()
         assert blank["description"] is None
+
+
+def test_position_follows_the_audio_clock_not_launch_time():
+    async def scenario():
+        backend = FakeBackend()
+        backend.clock = None
+        backend.audio_clock = lambda: backend.clock
+        service = PlaybackService(backend)
+        await service.play(make_track("alpha", duration_seconds=240))
+
+        # Launched but still buffering: nothing audible, so no progress yet.
+        assert (await service.snapshot()).position_seconds == 0
+
+        backend.clock = (12.0, 0.2)
+        assert (await service.snapshot()).position_seconds == 12.2
+
+        # A stalled stream must not keep advancing on wall-clock time.
+        backend.clock = (12.0, 9.0)
+        assert (await service.snapshot()).position_seconds == 12.5
+
+    asyncio.run(scenario())

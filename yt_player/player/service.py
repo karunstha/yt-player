@@ -309,8 +309,19 @@ class PlaybackService:
         if self._status != "playing" or self._started_at is None:
             return self._base_position_seconds
 
-        elapsed = (utc_now() - self._started_at).total_seconds()
-        position = self._base_position_seconds + max(elapsed, 0)
+        audio_clock = getattr(self.backend, "audio_clock", None)
+        if audio_clock is not None:
+            clock = audio_clock()
+            if clock is None:
+                # Still downloading/buffering: nothing is audible yet.
+                return self._base_position_seconds
+            seconds, age = clock
+            # ffplay reports many times a second; a stale clock means audio
+            # stalled, so only extrapolate a little past the last report.
+            position = seconds + min(max(age, 0), 0.5)
+        else:
+            elapsed = (utc_now() - self._started_at).total_seconds()
+            position = self._base_position_seconds + max(elapsed, 0)
         if self._track and self._track.duration_seconds is not None:
             return min(position, self._track.duration_seconds)
         return position

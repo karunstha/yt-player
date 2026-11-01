@@ -31,3 +31,6 @@ DEFAULT_BLUETOOTH_DEVICE_ID = env_str("DEFAULT_BLUETOOTH_DEVICE_ID")
 DEFAULT_VOLUME = env_float("DEFAULT_VOLUME", 0.8, minimum=0.0, maximum=1.0)
 PLAYBACK_COMPLETION_GRACE_SECONDS = env_float("PLAYBACK_COMPLETION_GRACE_SECONDS", 5.0, minimum=0.0)
 PLAYBACK_RECOVERY_RETRIES = env_int("PLAYBACK_RECOVERY_RETRIES", 2, minimum=0)
+# Lyrics are looked up on LRCLIB; set LYRICS_ENABLED=false for an offline player.
+LYRICS_ENABLED = (env_str("LYRICS_ENABLED", "true") or "true").lower() not in {"0", "false", "no", "off"}
+LYRICS_PREFETCH_AHEAD = env_int("LYRICS_PREFETCH_AHEAD", 2, minimum=0, maximum=10)

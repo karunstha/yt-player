@@ -1,7 +1,10 @@
 import os
+import re
 import signal
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import dataclass
 
 from yt_player.core.config import (
@@ -39,6 +42,16 @@ class BackendExitStatus:
         return "; ".join(parts) or "Playback backend exited unexpectedly"
 
 
+# ffplay's -stats line, e.g. "  12.34 M-A:  0.000 fd=   0 aq=   9KB ...". The
+# first number is the master (audio) clock: what is actually being played.
+_STATS_CLOCK = re.compile(rb"^\s*(-?\d+(?:\.\d+)?)\s+M-A:")
+
+
+def parse_stats_clock(line: bytes) -> float | None:
+    match = _STATS_CLOCK.match(line)
+    return float(match.group(1)) if match else None
+
+
 def player_env() -> dict[str, str]:
     """Environment for ffplay, which picks its audio output through SDL."""
     env = os.environ.copy()
@@ -57,6 +70,52 @@ class FfplayBackend:
         self.yt_process: subprocess.Popen | None = None
         self.player_process: subprocess.Popen | None = None
         self.current_url: str | None = None
+        self._clock_lock = threading.Lock()
+        self._clock: tuple[float, float] | None = None  # (stream seconds, monotonic time read)
+        self._clock_offset = 0.0
+        self._stream_start = 0.0
+
+    def audio_clock(self) -> tuple[float, float] | None:
+        """Track position ffplay is actually playing, and how many seconds ago it said so.
+
+        None until audio has started, so callers can tell startup apart from playback.
+        """
+        with self._clock_lock:
+            if self._clock is None:
+                return None
+            seconds, read_at = self._clock
+            return seconds + self._clock_offset, time.monotonic() - read_at
+
+    def _read_player_stderr(self, process: subprocess.Popen) -> None:
+        stream = getattr(process, "stderr", None)
+        if stream is None:
+            return
+        buffer = b""
+        first = True
+        while True:
+            chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(4096)
+            if not chunk:
+                break
+            buffer += chunk
+            *lines, buffer = re.split(rb"[\r\n]", buffer)
+            for line in lines:
+                clock = parse_stats_clock(line.replace(b"\x1b[2K", b""))
+                if clock is None:
+                    text = line.replace(b"\x1b[2K", b"").strip()
+                    # Keep ffplay's own error output visible in the service log.
+                    if text and b"M-A:" not in text and not text.startswith(b"nan"):
+                        sys.stderr.write(text.decode(errors="replace") + "\n")
+                    continue
+                with self._clock_lock:
+                    if process is not self.player_process:
+                        return
+                    if first:
+                        # A seek makes yt-dlp cut a section, and its timestamps
+                        # usually restart at 0; otherwise they are absolute.
+                        start = self._stream_start
+                        self._clock_offset = start if start > 0 and clock < start - 1 else 0.0
+                        first = False
+                    self._clock = (clock, time.monotonic())
 
     def try_connect_bluetooth(self, device_id: str) -> None:
         cmd = """
@@ -104,6 +163,10 @@ class FfplayBackend:
             self.try_connect_bluetooth(device_id)
 
         self.current_url = url
+        with self._clock_lock:
+            self._clock = None
+            self._clock_offset = 0.0
+            self._stream_start = position_seconds
         # Run yt-dlp with this interpreter so it is found even when the
         # environment's bin directory is not on PATH (pipx, uvx, services).
         ytdlp_command = [
@@ -146,22 +209,34 @@ class FfplayBackend:
                 "-autoexit",
                 "-loglevel",
                 "error",
+                # Report the real audio clock so position follows what is heard,
+                # not when the process was launched.
+                "-stats",
                 "-volume",
                 str(int(volume * 100)),
                 "-",
             ],
             stdin=self.yt_process.stdout,
+            stderr=subprocess.PIPE,
             env=player_env(),
             preexec_fn=os.setsid,
         )
         if self.yt_process.stdout is not None:
             self.yt_process.stdout.close()
+        threading.Thread(
+            target=self._read_player_stderr,
+            args=(self.player_process,),
+            name="ffplay-stats",
+            daemon=True,
+        ).start()
 
     def stop(self) -> None:
         self._terminate_process(self.yt_process)
         self._terminate_process(self.player_process)
         self.yt_process = None
         self.player_process = None
+        with self._clock_lock:
+            self._clock = None
 
     def pause(self) -> None:
         self._signal_process(self.yt_process, signal.SIGSTOP)

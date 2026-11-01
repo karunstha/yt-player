@@ -6,10 +6,19 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from yt_player.core.config import DATABASE_PATH, DEFAULT_BLUETOOTH_DEVICE_ID
+from yt_player.core.config import (
+    DATABASE_PATH,
+    DEFAULT_BLUETOOTH_DEVICE_ID,
+    LYRICS_ENABLED,
+    LYRICS_PREFETCH_AHEAD,
+)
 from yt_player.core.errors import ServiceError
 from yt_player.events.api import register_events_routes
 from yt_player.events.service import EventService
+from yt_player.lyrics.api import register_lyrics_routes
+from yt_player.lyrics.provider import LrclibProvider
+from yt_player.lyrics.repository import LyricsRepository
+from yt_player.lyrics.service import LyricsProvider, LyricsService
 from yt_player.player.backend import FfplayBackend
 from yt_player.player.api import register_player_routes
 from yt_player.player.controller import PlaybackController
@@ -30,6 +39,7 @@ def create_app(
     youtube_service: YouTubeService | None = None,
     playback_backend: FfplayBackend | None = None,
     connect_bluetooth_on_startup: bool = True,
+    lyrics_provider: LyricsProvider | None = None,
 ) -> FastAPI:
     playlist_repository = repository or PlaylistRepository(DATABASE_PATH)
     event_service = EventService()
@@ -42,6 +52,14 @@ def create_app(
         queue_service=queue_service,
         playlist_service=playlist_service,
         event_service=event_service,
+    )
+
+    lyrics_repository = LyricsRepository(playlist_repository.database_path)
+    lyrics_service = LyricsService(
+        repository=lyrics_repository,
+        provider=lyrics_provider or (LrclibProvider() if LYRICS_ENABLED else _NoLyrics()),
+        events=event_service,
+        prefetch_ahead=LYRICS_PREFETCH_AHEAD,
     )
 
     sync_task: asyncio.Task | None = None
@@ -79,12 +97,15 @@ def create_app(
             except asyncio.CancelledError:
                 pass
         await controller.shutdown()
+        await lyrics_service.shutdown()
+        lyrics_repository.close()
         playlist_repository.close()
 
     app = FastAPI(title="Media Playback Service", lifespan=lifespan)
     app.state.controller = controller
     app.state.playlists = playlist_service
     app.state.events = event_service
+    app.state.lyrics = lyrics_service
 
     register_error_handlers(app)
     register_events_routes(app, controller=controller, event_service=event_service)
@@ -97,9 +118,20 @@ def create_app(
         playlist_service=playlist_service,
         event_service=event_service,
     )
+    register_lyrics_routes(app, controller=controller, lyrics_service=lyrics_service)
     register_legacy_routes(app, controller=controller)
 
     return app
+
+
+class _NoLyrics:
+    """Provider used when LYRICS_ENABLED is off."""
+
+    name = "disabled"
+
+    async def find(self, query):
+        # Raised rather than "not found" so nothing is cached while disabled.
+        raise ServiceError("LYRICS_DISABLED", "Lyrics are turned off (LYRICS_ENABLED).", 404)
 
 
 def register_error_handlers(app: FastAPI) -> None:

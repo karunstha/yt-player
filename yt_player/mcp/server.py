@@ -1,4 +1,5 @@
 from typing import Any, Literal, cast
+from urllib.parse import quote
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -60,6 +61,19 @@ async def get_playback_state() -> dict[str, Any]:
 async def get_current_track() -> dict[str, Any]:
     """Get the current track."""
     return await client().get("/player/current")
+
+
+@mcp.tool()
+async def get_lyrics(track_id: str | None = None) -> dict[str, Any]:
+    """Get lyrics for the current track, or for a playing or queued track by id.
+
+    Returns status "found" or "not_found". Synced lyrics give each line's
+    time_seconds into the track. Add offset_seconds to every time before
+    comparing with playback position_seconds.
+    """
+    if track_id:
+        return await client().get(f"/tracks/{quote(track_id, safe='')}/lyrics")
+    return await client().get("/player/lyrics")
 
 
 @mcp.tool()

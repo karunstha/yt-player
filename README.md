@@ -265,6 +265,8 @@ Playback service:
 - `YTDLP_REMOTE_COMPONENTS`: what yt-dlp may download if the bundled challenge solver (`yt-dlp-ejs`) is missing or doesn't match the installed yt-dlp version: `ejs:github`, `ejs:npm`, or `none`. Defaults to `ejs:github`. Normally nothing is downloaded, because the `server` extra installs the matching solver.
 - `PLAYBACK_COMPLETION_GRACE_SECONDS`: failed backend exits within this many seconds of track end are treated as completed. Defaults to `5`.
 - `PLAYBACK_RECOVERY_RETRIES`: automatic stream restarts per track after a non-clean backend exit. Defaults to `2`.
+- `LYRICS_ENABLED`: look up lyrics on LRCLIB. Defaults to `true`; the service then needs outbound access to `lrclib.net`.
+- `LYRICS_PREFETCH_AHEAD`: how many upcoming queued tracks get lyrics fetched early. Defaults to `2`.
 
 MCP server:
 
@@ -337,11 +339,21 @@ Playlists:
 - `GET /playlists/{id}/export`
 - `POST /playlists/import`
 
+Lyrics:
+
+- `GET /player/lyrics`: lyrics for the current track.
+- `GET /tracks/{track_id}/lyrics`: lyrics for a playing or queued track.
+- `PUT /tracks/{track_id}/lyrics/offset` with `{"offset_seconds": 0.5}`: a per-track timing correction (positive shows lines later), kept across refetches.
+
+Lyrics come from [LRCLIB](https://lrclib.net). The service cleans upload titles such as "Artist - Song (Official Video)" before searching, and rejects any match whose length differs from the track by more than 4 seconds, because a live or extended cut has different timestamps. Results, including misses, are cached in SQLite; a miss is retried after 7 days, and a network failure is never cached. The current track and the next `LYRICS_PREFETCH_AHEAD` queued tracks (default 2) are fetched as soon as they are queued. Set `LYRICS_ENABLED=false` to turn lookups off.
+
+Synced lyrics list each line's `time_seconds`. Playback `position_seconds` follows ffplay's audio clock, so a client can highlight the current line locally between `playback.sync` events.
+
 Realtime events:
 
 - `WS /events`
 
-The WebSocket sends `playback.sync` on connect and then broadcasts meaningful events such as `track.changed`, `playback.state_changed`, `playback.seeked`, `queue.changed`, `playlist.changed`, and `track.completed`. While playing, it emits low-frequency `playback.sync` updates approximately every 3 seconds.
+The WebSocket sends `playback.sync` on connect and then broadcasts meaningful events such as `track.changed`, `playback.state_changed`, `playback.seeked`, `queue.changed`, `playlist.changed`, `track.completed`, `lyrics.ready` (a lookup finished; carries the lyrics), and `lyrics.offset_changed`. While playing, it emits low-frequency `playback.sync` updates approximately every 3 seconds.
 
 ### Legacy API
 
@@ -363,6 +375,7 @@ The original endpoints are still available:
 - `yt_player/player/`: playback routes, queue routes, legacy playback routes, playback controller, queue service, ffplay/yt-dlp backend, and player/queue models.
 - `yt_player/playlists/`: playlist routes, persistent playlist service, SQLite repository, and playlist models.
 - `yt_player/sources/`: media source integrations. YouTube is currently implemented in `yt_player/sources/youtube.py`.
+- `yt_player/lyrics/`: lyrics routes, LRCLIB provider, title cleanup and match scoring (`matching.py`), SQLite cache, and prefetching service.
 - `yt_player/events/`: WebSocket route, event broadcaster, and event models.
 - `yt_player/mcp/`: MCP server and HTTP client wrapper for the media service API.
 - `main.py`: ASGI entrypoint for running the app directly with Uvicorn (`uvicorn main:app`).
