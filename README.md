@@ -192,7 +192,7 @@ Read [Security](#security) before you expose either port on a network.
 |---|---|
 | Status | `health`, `get_playback_state`, `get_current_track` |
 | Search | `search_media` |
-| Playback | `play_media`, `pause_playback`, `resume_playback`, `stop_playback`, `seek_playback`, `next_track`, `previous_track`, `set_volume`, `set_shuffle`, `set_repeat` |
+| Playback | `play_media`, `pause_playback`, `resume_playback`, `stop_playback`, `seek_playback`, `next_track`, `previous_track`, `set_volume`, `set_shuffle`, `set_repeat`, `set_queue_more` |
 | History | `get_playback_history` (paginated with `next_before`) |
 | Queue | `get_queue`, `append_queue_track`, `insert_queue_track_next`, `queue_playlist`, `remove_queue_item`, `clear_queue`, `replace_queue_with_playlist` |
 | Playlists | `list_playlists`, `get_playlist`, `create_playlist`, `rename_playlist`, `delete_playlist`, `add_track_to_playlist`, `add_tracks_to_playlist`, `add_current_track_to_playlist`, `move_playlist_track`, `remove_track_from_playlist`, `clear_playlist`, `play_playlist` |
@@ -200,6 +200,12 @@ Read [Security](#security) before you expose either port on a network.
 | Import/export | `export_playlists`, `import_playlists` |
 
 Tools that take a track (`play_media`, `append_queue_track`, `insert_queue_track_next`, `add_track_to_playlist`) accept either a search `query` or a `url`.
+
+`play_media` enables `queue_more` by default. It starts a YouTube Music radio from
+the requested song and keeps appending deduplicated related songs as the queue runs
+low. Pass `queue_more=false`, or call `set_queue_more(false)` later, to stop adding
+tracks without removing items that are already queued. Call `set_queue_more(true)`
+to resume recommendations.
 
 Searches and queries take an optional `search_type` that sets what to look for:
 
@@ -279,7 +285,8 @@ The MCP server is one client of this API. You can also call it directly, or buil
 
 Playback:
 
-- `POST /player/play` with one of `url`, `query`, or `track`
+- `POST /player/play` with one of `url`, `query`, or `track`; optional `queue_more`
+  (or `queueMore`) defaults to `true`
 - `GET /player/state`
 - `GET /player/current`
 - `POST /player/pause`
@@ -291,6 +298,7 @@ Playback:
 - `POST /player/volume`
 - `POST /player/shuffle`
 - `POST /player/repeat`
+- `POST /player/queue-more` with `queue_more` (or `queueMore`)
 - `GET /player/history?days=7&before=<iso-date-time>&limit=100`
 
 Search:

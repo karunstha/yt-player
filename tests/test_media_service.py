@@ -131,6 +131,30 @@ def make_controller(tmp_path, backend):
     return controller, repository
 
 
+class RecommendationYoutubeService(FakeYoutubeService):
+    def __init__(self):
+        super().__init__()
+        self.recommendation_calls = []
+
+    def recommendations(self, track, limit=10):
+        self.recommendation_calls.append((track.source_id, limit))
+        start = 1 if track.source_id == "alpha" else 5
+        return [make_track(f"radio-{index}") for index in range(start, start + 4)]
+
+
+def make_recommendation_client(tmp_path):
+    repository = PlaylistRepository(str(tmp_path / "media.sqlite3"))
+    backend = FakeBackend()
+    youtube = RecommendationYoutubeService()
+    app = create_app(
+        repository=repository,
+        youtube_service=youtube,
+        playback_backend=backend,
+        connect_bluetooth_on_startup=False,
+    )
+    return TestClient(app), youtube
+
+
 def test_playlist_crud(tmp_path):
     with make_client(tmp_path)[0] as client:
         created = client.post(
@@ -193,6 +217,56 @@ def test_add_current_track_to_playlist(tmp_path):
         updated = client.post(f"/playlists/{playlist['id']}/tracks/current")
         assert updated.status_code == 200
         assert updated.json()["tracks"][0]["source_id"] == "alpha"
+
+
+def test_play_queues_related_tracks_by_default_and_replenishes(tmp_path):
+    client, youtube = make_recommendation_client(tmp_path)
+    with client:
+        started = client.post("/player/play", json={"query": "alpha"}).json()
+        assert started["queue_more"] is True
+        assert started["queue_length"] == 5
+        assert youtube.recommendation_calls == [("alpha", 10)]
+
+        client.post("/player/next")
+        advanced = client.post("/player/next").json()
+        queue = client.get("/queue").json()
+
+        assert advanced["queue_length"] == 9
+        assert [item["track"]["source_id"] for item in queue["items"]] == [
+            "alpha",
+            "radio-1",
+            "radio-2",
+            "radio-3",
+            "radio-4",
+            "radio-5",
+            "radio-6",
+            "radio-7",
+            "radio-8",
+        ]
+        assert youtube.recommendation_calls[-1] == ("radio-4", 10)
+
+
+def test_queue_more_can_be_disabled_on_play_or_while_playing(tmp_path):
+    client, youtube = make_recommendation_client(tmp_path)
+    with client:
+        opted_out = client.post(
+            "/player/play", json={"query": "alpha", "queueMore": False}
+        ).json()
+        assert opted_out["queue_more"] is False
+        assert opted_out["queue_length"] == 1
+        assert youtube.recommendation_calls == []
+
+        started = client.post("/player/play", json={"query": "alpha"}).json()
+        assert started["queue_length"] == 5
+        disabled = client.post(
+            "/player/queue-more", json={"queue_more": False}
+        ).json()
+        assert disabled["queue_more"] is False
+
+        client.post("/player/next")
+        client.post("/player/next")
+        assert client.get("/queue").json()["queue_length"] == 5
+        assert youtube.recommendation_calls == [("alpha", 10)]
 
 
 def test_queue_append_insert_remove_and_clear(tmp_path):

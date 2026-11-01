@@ -78,10 +78,17 @@ async def play_media(
     url: str | None = None,
     requested_by: str | None = None,
     search_type: SearchType | None = None,
+    queue_more: bool = True,
 ) -> dict[str, Any]:
-    """Play media by search query or URL."""
+    """Play media by query or URL. queue_more continuously queues related songs."""
     payload = compact(
-        {"query": query, "url": url, "requested_by": requested_by, "search_type": search_type}
+        {
+            "query": query,
+            "url": url,
+            "requested_by": requested_by,
+            "search_type": search_type,
+            "queue_more": queue_more,
+        }
     )
     return await client().post("/player/play", json=payload)
 
@@ -153,6 +160,12 @@ async def set_shuffle(shuffle: bool) -> dict[str, Any]:
 async def set_repeat(repeat_mode: Literal["off", "one", "all"]) -> dict[str, Any]:
     """Set repeat mode."""
     return await client().post("/player/repeat", json={"repeat_mode": repeat_mode})
+
+
+@mcp.tool()
+async def set_queue_more(queue_more: bool) -> dict[str, Any]:
+    """Start or stop automatically adding related songs. Existing items stay queued."""
+    return await client().post("/player/queue-more", json={"queue_more": queue_more})
 
 
 @mcp.tool()

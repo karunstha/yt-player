@@ -7,6 +7,7 @@ from yt_player.player.models import (
     PlaybackHistoryPage,
     PlaybackState,
     PlayRequest,
+    QueueMoreRequest,
     RepeatRequest,
     SeekRequest,
     ShuffleRequest,
@@ -55,6 +56,10 @@ def register_player_routes(app: FastAPI, *, controller: PlaybackController) -> N
     @app.post("/player/repeat", response_model=PlaybackState)
     async def player_repeat(req: RepeatRequest):
         return await controller.set_repeat_mode(req.repeat_mode)
+
+    @app.post("/player/queue-more", response_model=PlaybackState)
+    async def player_queue_more(req: QueueMoreRequest):
+        return await controller.set_queue_more(req.queue_more)
 
     @app.get("/player/state", response_model=PlaybackState)
     async def player_state():

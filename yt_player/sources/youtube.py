@@ -92,7 +92,7 @@ def materialize_track(track: TrackInput, requested_by: str | None = None) -> Tra
 
 
 def _best_thumbnail(result: dict) -> str | None:
-    thumbnails = result.get("thumbnails") or []
+    thumbnails = result.get("thumbnails") or result.get("thumbnail") or []
     if not thumbnails:
         return None
     return thumbnails[-1].get("url")
@@ -117,7 +117,7 @@ def _track_from_search_result(
     title = result.get("title") or url
     duration = result.get("duration_seconds")
     if duration is None:
-        duration = parse_duration_seconds(result.get("duration"))
+        duration = parse_duration_seconds(result.get("duration") or result.get("length"))
 
     return Track(
         id=make_track_id("youtube", source_id, url),
@@ -207,6 +207,38 @@ class YouTubeService:
         except Exception as exc:
             raise ServiceError("SEARCH_FAILED", f"YouTube search failed: {exc}", 502) from exc
         return list((info or {}).get("entries") or [])
+
+    def recommendations(
+        self,
+        track: Track,
+        limit: int = 10,
+    ) -> list[Track]:
+        """Return YouTube Music's radio recommendations for a playable song."""
+        if track.source != "youtube" or not track.source_id or limit < 1:
+            return []
+
+        try:
+            watch_playlist = self.ytmusic.get_watch_playlist(
+                videoId=track.source_id,
+                limit=limit + 1,
+                radio=True,
+            )
+        except Exception as exc:
+            raise ServiceError(
+                "RECOMMENDATIONS_FAILED", "Could not load related songs.", 502
+            ) from exc
+
+        recommendations = []
+        for result in watch_playlist.get("tracks") or []:
+            if not result.get("videoId"):
+                continue
+            candidate = _track_from_search_result(result)
+            if candidate.id == track.id:
+                continue
+            recommendations.append(candidate)
+            if len(recommendations) >= limit:
+                break
+        return recommendations
 
     def resolve_url(self, url: str, requested_by: str | None = None) -> Track:
         source_id = extract_youtube_id(url)

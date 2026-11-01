@@ -27,6 +27,9 @@ from yt_player.sources.youtube import YouTubeService, materialize_track
 
 
 class PlaybackController:
+    RECOMMENDATION_BATCH_SIZE = 10
+    RECOMMENDATION_LOW_WATERMARK = 3
+
     def __init__(
         self,
         *,
@@ -43,6 +46,7 @@ class PlaybackController:
         self.events = event_service
         self._lock = asyncio.Lock()
         self._active_history_id: str | None = None
+        self._queue_more_enabled = True
 
     async def search(
         self,
@@ -125,6 +129,7 @@ class PlaybackController:
 
     async def play(self, request: PlayRequest) -> PlaybackState:
         async with self._lock:
+            self._queue_more_enabled = request.queue_more
             track = await self.resolve_track(
                 url=request.url,
                 query=request.query,
@@ -133,6 +138,7 @@ class PlaybackController:
                 search_type=request.search_type,
             )
             queue_state = await self.queue.replace([track])
+            queue_state = await self._replenish_recommendations(track, queue_state)
             await self._finish_active_history("replaced")
             await self.playback.play(
                 track, bluetooth_device_id=request.bluetooth_device_id
@@ -192,6 +198,21 @@ class PlaybackController:
         await self.events.broadcast("playback.state_changed", state.model_dump(mode="json"))
         return state
 
+    async def set_queue_more(self, queue_more: bool) -> PlaybackState:
+        async with self._lock:
+            self._queue_more_enabled = queue_more
+            queue_state = await self.queue.snapshot()
+            current = await self.queue.current()
+            if queue_more and current is not None:
+                queue_state = await self._replenish_recommendations(
+                    current.track, queue_state
+                )
+            state = await self._state_from(queue_state)
+
+        await self.events.broadcast("queue.changed", queue_state.model_dump(mode="json"))
+        await self.events.broadcast("playback.state_changed", state.model_dump(mode="json"))
+        return state
+
     async def set_shuffle(self, shuffle: bool) -> PlaybackState:
         await self.queue.set_shuffle(shuffle)
         await self.playback.set_shuffle(shuffle)
@@ -203,6 +224,10 @@ class PlaybackController:
 
     async def next(self, *, manual: bool = True) -> PlaybackState:
         async with self._lock:
+            queue_state = await self.queue.snapshot()
+            current = await self.queue.current()
+            if current is not None:
+                await self._replenish_recommendations(current.track, queue_state)
             repeat_mode = await self.playback.repeat_mode()
             item = await self.queue.next(repeat_mode, manual=manual)
             if item is None:
@@ -412,10 +437,52 @@ class PlaybackController:
         await self._finish_active_history("stopped", prior_state)
 
     async def _state_from(self, queue_state: QueueState) -> PlaybackState:
-        return await self.playback.snapshot(
+        state = await self.playback.snapshot(
             queue_index=queue_state.current_index,
             queue_length=queue_state.queue_length,
         )
+        return state.model_copy(update={"queue_more": self._queue_more_enabled})
+
+    async def _replenish_recommendations(
+        self, seed: Track, queue_state: QueueState
+    ) -> QueueState:
+        if not self._queue_more_enabled:
+            return queue_state
+
+        current_index = queue_state.current_index
+        remaining = (
+            queue_state.queue_length
+            if current_index is None
+            else queue_state.queue_length - current_index - 1
+        )
+        if remaining > self.RECOMMENDATION_LOW_WATERMARK:
+            return queue_state
+
+        # Use the tail as the next radio seed so each refill can discover a new
+        # branch instead of repeatedly returning the first song's same radio page.
+        if queue_state.items:
+            seed = queue_state.items[-1].track
+        existing_ids = {item.track.id for item in queue_state.items}
+        try:
+            tracks = await asyncio.to_thread(
+                self.youtube_service.recommendations,
+                seed,
+                self.RECOMMENDATION_BATCH_SIZE,
+            )
+        except Exception:
+            # Autoplay is best-effort: an upstream recommendation failure must
+            # never prevent the explicitly requested track from playing.
+            return queue_state
+
+        unique = []
+        for track in tracks:
+            if track.id in existing_ids:
+                continue
+            existing_ids.add(track.id)
+            unique.append(track)
+        if not unique:
+            return queue_state
+        return await self.queue.extend(unique)
 
     def _start_history(self, track: Track, state: PlaybackState) -> None:
         if state.state != "playing":

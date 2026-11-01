@@ -18,6 +18,7 @@ def test_mcp_server_registers_core_tools():
 
     assert "get_playback_state" in tool_names
     assert "play_media" in tool_names
+    assert "set_queue_more" in tool_names
     assert "search_media" in tool_names
     assert "get_playback_history" in tool_names
     assert "list_playlists" in tool_names

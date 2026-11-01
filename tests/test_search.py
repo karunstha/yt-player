@@ -26,6 +26,10 @@ class FakeYTMusic:
         self.calls.append((query, filter, limit))
         return self.results
 
+    def get_watch_playlist(self, **kwargs):
+        self.calls.append(("watch", kwargs))
+        return {"tracks": self.results}
+
 
 SONG = {
     "videoId": "song1",
@@ -81,6 +85,32 @@ def test_podcast_episode_uses_podcast_name_as_artist():
         "Lex Fridman Podcast",
         None,
     )
+
+
+def test_recommendations_use_radio_and_skip_seed_track():
+    seed = FakeYoutubeService().tracks["alpha"]
+    related = {
+        "videoId": "related1",
+        "title": "Related Song",
+        "artists": [{"name": "Related Artist"}],
+        "length": "3:21",
+        "thumbnail": [{"url": "related-thumb"}],
+    }
+    ytmusic = FakeYTMusic(
+        [
+            {"videoId": "alpha", "title": "Alpha Song"},
+            related,
+        ]
+    )
+
+    tracks = YouTubeService(ytmusic).recommendations(seed, limit=5)
+
+    assert ytmusic.calls == [
+        ("watch", {"videoId": "alpha", "limit": 6, "radio": True})
+    ]
+    assert [track.source_id for track in tracks] == ["related1"]
+    assert tracks[0].duration_seconds == 201
+    assert tracks[0].thumbnail_url == "related-thumb"
 
 
 def test_videos_search_all_of_youtube(monkeypatch):
@@ -164,7 +194,10 @@ def test_mcp_tools_forward_search_type(monkeypatch):
     assert sent == [
         ("/search", {"q": "sourdough", "count": 10, "type": "videos"}),
         ("/search", {"q": "queen", "count": 10}),
-        ("/player/play", {"query": "lex fridman", "search_type": "podcasts"}),
+        (
+            "/player/play",
+            {"query": "lex fridman", "search_type": "podcasts", "queue_more": True},
+        ),
         (
             "/playlists/Mix/tracks/bulk",
             {"items": [{"url": "https://youtu.be/a"}, {"query": "talk", "search_type": "videos"}]},

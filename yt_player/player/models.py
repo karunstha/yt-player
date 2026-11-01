@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from yt_player.core.time import utc_now
 
@@ -55,6 +55,7 @@ class PlaybackState(BaseModel):
     shuffle: bool = False
     queue_index: Optional[int] = None
     queue_length: int = 0
+    queue_more: bool = True
     started_at: Optional[datetime] = None
     updated_at: datetime = Field(default_factory=utc_now)
     error: Optional[str] = None
@@ -103,6 +104,11 @@ class PlayRequest(BaseModel):
     search_type: Optional[SearchType] = Field(
         default=None, description="What a query searches for. Defaults to DEFAULT_SEARCH_TYPE."
     )
+    queue_more: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("queue_more", "queueMore"),
+        description="Continuously add related songs to the queue.",
+    )
 
     @model_validator(mode="after")
     def require_one_play_target(self) -> "PlayRequest":
@@ -126,6 +132,10 @@ class ShuffleRequest(BaseModel):
 
 class RepeatRequest(BaseModel):
     repeat_mode: RepeatMode
+
+
+class QueueMoreRequest(BaseModel):
+    queue_more: bool = Field(validation_alias=AliasChoices("queue_more", "queueMore"))
 
 
 class AddTrackRequest(BaseModel):
