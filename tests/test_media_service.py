@@ -142,6 +142,13 @@ class RecommendationYoutubeService(FakeYoutubeService):
         return [make_track(f"radio-{index}") for index in range(start, start + 4)]
 
 
+class FailingRecommendationYoutubeService(FakeYoutubeService):
+    def recommendations(self, track, limit=10):
+        raise ServiceError(
+            "RECOMMENDATIONS_FAILED", "Could not load related songs.", 502
+        )
+
+
 def make_recommendation_client(tmp_path):
     repository = PlaylistRepository(str(tmp_path / "media.sqlite3"))
     backend = FakeBackend()
@@ -267,6 +274,29 @@ def test_queue_more_can_be_disabled_on_play_or_while_playing(tmp_path):
         client.post("/player/next")
         assert client.get("/queue").json()["queue_length"] == 5
         assert youtube.recommendation_calls == [("alpha", 10)]
+
+
+def test_recommendation_failure_keeps_playback_usable_and_is_logged(tmp_path, caplog):
+    repository = PlaylistRepository(str(tmp_path / "media.sqlite3"))
+    backend = FakeBackend()
+    app = create_app(
+        repository=repository,
+        youtube_service=FailingRecommendationYoutubeService(),
+        playback_backend=backend,
+        connect_bluetooth_on_startup=False,
+    )
+
+    with caplog.at_level("WARNING", logger="yt_player.player.controller"):
+        with TestClient(app) as client:
+            started = client.post("/player/play", json={"query": "alpha"})
+            queue = client.get("/queue")
+
+    assert started.status_code == 200
+    assert started.json()["queue_more"] is True
+    assert started.json()["track"]["source_id"] == "alpha"
+    assert queue.json()["queue_length"] == 1
+    assert backend.started_urls[-1].endswith("alpha")
+    assert "Recommendation lookup failed for youtube:alpha" in caplog.text
 
 
 def test_queue_append_insert_remove_and_clear(tmp_path):

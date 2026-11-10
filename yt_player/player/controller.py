@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 from datetime import datetime, timedelta, timezone
 
@@ -24,6 +25,9 @@ from yt_player.playlists.models import TrackAddFailure
 from yt_player.playlists.service import PlaylistService
 from yt_player.sources.models import SearchResponse
 from yt_player.sources.youtube import YouTubeService, materialize_track
+
+
+logger = logging.getLogger(__name__)
 
 
 class PlaybackController:
@@ -469,9 +473,10 @@ class PlaybackController:
                 seed,
                 self.RECOMMENDATION_BATCH_SIZE,
             )
-        except Exception:
+        except Exception as exc:
             # Autoplay is best-effort: an upstream recommendation failure must
             # never prevent the explicitly requested track from playing.
+            logger.warning("Recommendation lookup failed for %s: %s", seed.id, exc)
             return queue_state
 
         unique = []
